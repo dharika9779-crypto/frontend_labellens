@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { RefreshCw, Loader2, Settings } from 'lucide-react';
+
 import { ImageUploader } from './components/ImageUploader';
 import { ResultsPanel } from './components/ResultsPanel';
 import { BarcodeScanner } from './components/BarcodeScanner';
@@ -16,6 +16,8 @@ import { ThemeToggle, applyTheme, getTheme } from './components/ThemeToggle';
 import { t, getSavedLanguage, saveLanguage } from './translations';
 import type { Language } from './translations';
 import type { FullScanResponse } from './services/api';
+import { RefreshCw, Loader2, Settings, LogOut } from 'lucide-react';
+
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -68,14 +70,18 @@ function App() {
   };
 
   // ── Profile reset ─────────────────────────────────────────
-  const handleResetProfile = () => {
-    clearUserProfile();
-    setProfileReady(false);
-    setShowProfileSetup(true);
-    setCurrentStep(1);
-    setAnalysisResult(null);
-    setExtractedText('');
-  };
+  const handleLogout = () => {
+  clearUserProfile();
+  setProfileReady(false);
+  setShowProfileSetup(true);
+  setCurrentStep(1);
+  setAnalysisResult(null);
+  setExtractedText('');
+  setUserName('');
+  setIsDiabetic(false);
+  setAllergies([]);
+};
+
 
   // ── Extract complete ──────────────────────────────────────
   const handleExtractComplete = (text: string, fallback: boolean) => {
@@ -280,12 +286,13 @@ function App() {
 
               {/* Settings button */}
               <button
-                onClick={handleResetProfile}
-                title="Reset Profile"
-                className="p-2 rounded-xl border border-white/10 text-[#8B95A8] hover:border-[#AAFF45]/50 hover:text-[#AAFF45] transition-all"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+              onClick={handleLogout}
+              title="Logout"
+              className="flex items-center gap-1 px-3 py-2 rounded-xl border border-[#FF3D5A]/30 bg-[#FF3D5A]/5 text-[#FF3D5A] hover:bg-[#FF3D5A]/15 hover:border-[#FF3D5A] transition-all font-mono text-sm"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
 
               {/* Scan Another — only on step 3 */}
               {currentStep === 3 && (
