@@ -1,596 +1,600 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Button } from './ui/button';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+import { ImageUploader } from './components/ImageUploader';
+import { ResultsPanel } from './components/ResultsPanel';
+import { BarcodeScanner } from './components/BarcodeScanner';
+import { UserProfile, getUserProfile, clearUserProfile } from './components/UserProfile';
+import { Button } from './components/ui/button';
+import { Toaster } from './components/ui/sonner';
+import { toast } from 'sonner';
+import { ScanHistory, saveScan } from './components/ScanHistory';
+import { VoiceAssistant } from './components/VoiceAssistant';
+import { ProductComparison } from './components/ProductComparison';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { ThemeToggle, applyTheme, getTheme } from './components/ThemeToggle';
+import { t, getSavedLanguage, saveLanguage } from './translations';
+import type { Language } from './translations';
+import type { FullScanResponse } from './services/api';
+import { RefreshCw, Loader2, Settings, LogOut } from 'lucide-react';
 
-export interface UserProfileData {
-  email: string;
-  name: string;
-  age: string;
-  dietType: string;
-  isDiabetic: boolean;
-  medicalConditions: string[];
-  allergies: string[];
-  isSetup: boolean;
-}
 
-const ALLERGY_OPTIONS = [
-  { value: 'gluten',    label: 'Gluten',    emoji: '🌾' },
-  { value: 'dairy',     label: 'Dairy',     emoji: '🥛' },
-  { value: 'nuts',      label: 'Tree Nuts', emoji: '🌰' },
-  { value: 'peanuts',   label: 'Peanuts',   emoji: '🥜' },
-  { value: 'soy',       label: 'Soy',       emoji: '🫘' },
-  { value: 'eggs',      label: 'Eggs',      emoji: '🥚' },
-  { value: 'shellfish', label: 'Shellfish', emoji: '🦐' },
-  { value: 'fish',      label: 'Fish',      emoji: '🐟' },
-  { value: 'sesame',    label: 'Sesame',    emoji: '🌿' },
-  { value: 'sulfites',  label: 'Sulfites',  emoji: '🧪' },
-];
+function App() {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [scanMode, setScanMode] = useState<'label' | 'barcode'>('label');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [extractedText, setExtractedText] = useState('');
+  const [isDiabetic, setIsDiabetic] = useState(false);
+  const [allergies, setAllergies] = useState<string[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<FullScanResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [userName, setUserName] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
+  const [lang, setLang] = useState<Language>(getSavedLanguage());
+  type ComparisonCb = (results: FullScanResponse, name: string) => void;
+  const [comparisonCallback, setComparisonCallback] = useState<ComparisonCb | null>(null);
 
-const AGE_OPTIONS = [
-  { value: 'child',  label: 'Child',  emoji: '👶', desc: 'Under 12' },
-  { value: 'teen',   label: 'Teen',   emoji: '🧒', desc: '13–17'   },
-  { value: 'adult',  label: 'Adult',  emoji: '🧑', desc: '18–60'   },
-  { value: 'senior', label: 'Senior', emoji: '👴', desc: '60+'     },
-];
+  // ── Apply saved theme on mount ────────────────────────────
+  useEffect(() => {
+    applyTheme(getTheme());
+  }, []);
 
-const DIET_OPTIONS = [
-  { value: 'none',       label: 'No Restriction', emoji: '🍽️' },
-  { value: 'vegetarian', label: 'Vegetarian',     emoji: '🥗' },
-  { value: 'vegan',      label: 'Vegan',          emoji: '🌱' },
-  { value: 'keto',       label: 'Keto',           emoji: '🥩' },
-  { value: 'low_sodium', label: 'Low Sodium',     emoji: '🧂' },
-  { value: 'low_sugar',  label: 'Low Sugar',      emoji: '🍬' },
-];
+  // ── App load hone pe profile check karo ──────────────────
+  useEffect(() => {
+    const profile = getUserProfile();
+    if (profile.isSetup) {
+      setIsDiabetic(profile.isDiabetic);
+      setAllergies(profile.allergies);
+      setUserName(profile.name);
+      setProfileReady(true);
+    } else {
+      setShowProfileSetup(true);
+    }
+  }, []);
 
-const MEDICAL_OPTIONS = [
-  { value: 'diabetes',     label: 'Diabetes',      emoji: '🩺' },
-  { value: 'hypertension', label: 'High BP',        emoji: '💓' },
-  { value: 'pregnant',     label: 'Pregnant',       emoji: '🤰' },
-  { value: 'heart',        label: 'Heart Disease',  emoji: '❤️' },
-  { value: 'kidney',       label: 'Kidney Disease', emoji: '🫘' },
-  { value: 'thyroid',      label: 'Thyroid',        emoji: '🦋' },
-  { value: 'ibs',          label: 'IBS/Gut Issues', emoji: '🫃' },
-  { value: 'celiac',       label: 'Celiac Disease', emoji: '🌾' },
-];
-
-const STORAGE_KEY = 'labellens_user_profile';
-
-// ── STORAGE HELPERS ───────────────────────────────────────────
-export function getUserProfile(): UserProfileData {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return {
-    email: '', name: '', age: 'adult', dietType: 'none',
-    isDiabetic: false, medicalConditions: [],
-    allergies: [], isSetup: false,
-  };
-}
-
-export function saveUserProfile(profile: UserProfileData): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-}
-
-export function clearUserProfile(): void {
-  localStorage.removeItem(STORAGE_KEY);
-}
-
-// ── MONGODB API HELPERS ───────────────────────────────────────
-async function saveProfileToMongo(profile: UserProfileData): Promise<void> {
-  try {
-    // Try update first — if not found, create
-    const res = await fetch(`${BASE_URL}/user/${encodeURIComponent(profile.email)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: profile.email,
-        name: profile.name,
-        age: profile.age,
-        diet_type: profile.dietType,
-        is_diabetic: profile.isDiabetic,
-        medical_conditions: profile.medicalConditions,
-        allergies: profile.allergies,
-      }),
+  // ── Profile setup complete ────────────────────────────────
+  const handleProfileComplete = (profile: any) => {
+    setIsDiabetic(profile.isDiabetic);
+    setAllergies(profile.allergies);
+    setUserName(profile.name);
+    setProfileReady(true);
+    setShowProfileSetup(false);
+    toast.success(`Welcome, ${profile.name}! 🎉`, {
+      description: 'Your health profile has been saved.'
     });
+  };
 
-    if (!res.ok) {
-      // Create new user
-      await fetch(`${BASE_URL}/user`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: profile.email,
-          name: profile.name,
-          age: profile.age,
-          diet_type: profile.dietType,
-          is_diabetic: profile.isDiabetic,
-          medical_conditions: profile.medicalConditions,
-          allergies: profile.allergies,
-        }),
+  // ── Profile reset ─────────────────────────────────────────
+  const handleLogout = () => {
+  clearUserProfile();
+  setProfileReady(false);
+  setShowProfileSetup(true);
+  setCurrentStep(1);
+  setAnalysisResult(null);
+  setExtractedText('');
+  setUserName('');
+  setIsDiabetic(false);
+  setAllergies([]);
+};
+
+
+  // ── Extract complete ──────────────────────────────────────
+  const handleExtractComplete = (text: string, fallback: boolean) => {
+    setExtractedText(text);
+    setUsedFallback(fallback);
+    setCurrentStep(2);
+    if (fallback) {
+      toast.warning('Using demo mode - Backend unavailable', {
+        description: 'Connect your FastAPI backend for live analysis'
       });
     }
-  } catch (e) {
-    console.error('MongoDB save failed — using localStorage only', e);
-  }
-}
-
-async function loadProfileFromMongo(email: string): Promise<UserProfileData | null> {
-  try {
-    const res = await fetch(`${BASE_URL}/user/${encodeURIComponent(email)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const u = data.user;
-    return {
-      email: u.email,
-      name: u.name,
-      age: u.age || 'adult',
-      dietType: u.diet_type || 'none',
-      isDiabetic: u.is_diabetic || false,
-      medicalConditions: u.medical_conditions || [],
-      allergies: u.allergies || [],
-      isSetup: true,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ── MAIN COMPONENT ────────────────────────────────────────────
-interface UserProfileProps {
-  onComplete: (profile: UserProfileData) => void;
-}
-
-export function UserProfile({ onComplete }: UserProfileProps) {
-  const [step, setStep] = useState<'email' | 'name' | 'age' | 'diet' | 'medical' | 'allergies'>('email');
-  const [email, setEmail]   = useState('');
-  const [name, setName]     = useState('');
-  const [age, setAge]       = useState('adult');
-  const [dietType, setDietType] = useState('none');
-  const [medicalConditions, setMedicalConditions] = useState<string[]>([]);
-  const [allergies, setAllergies]   = useState<string[]>([]);
-  const [customMedical, setCustomMedical] = useState('');
-  const [customAllergy, setCustomAllergy] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [emailError, setEmailError] = useState('');
-
-  const steps = ['email', 'name', 'age', 'diet', 'medical', 'allergies'];
-  const currentStepIndex = steps.indexOf(step);
-
-  const toggleItem = (list: string[], setList: any, value: string) => {
-    setList((prev: string[]) =>
-      prev.includes(value) ? prev.filter((i: string) => i !== value) : [...prev, value]
-    );
   };
 
-  const addCustomAllergy = () => {
-    const trimmed = customAllergy.trim().toLowerCase();
-    if (trimmed && !allergies.includes(trimmed)) {
-      setAllergies(prev => [...prev, trimmed]);
-      setCustomAllergy('');
-    }
-  };
-  const addCustomMedical = () => {
-  const trimmed = customMedical.trim().toLowerCase();
-  if (trimmed && !medicalConditions.includes(trimmed)) {
-    setMedicalConditions(prev => [...prev, trimmed]);
-    setCustomMedical('');
-  }
-};
-
-const removeMedical = (value: string) => {
-  setMedicalConditions(prev => prev.filter(m => m !== value));
-};
-  const removeAllergy = (value: string) => {
-    setAllergies(prev => prev.filter(a => a !== value));
-  };
-
-  // ── EMAIL STEP — check if user exists ─────────────────────
-  const handleEmailContinue = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setEmailError('Please enter a valid email');
-      return;
-    }
-    setEmailError('');
+  // ── Analyse ───────────────────────────────────────────────
+  const handleAnalyze = async () => {
     setLoading(true);
+    try {
+      const { apiService } = await import('./services/api');
+      const profile = getUserProfile();
+      const result = await apiService.fullScan(
+        extractedText,
+        isDiabetic,
+        allergies,
+        profile.age || 'adult',
+        profile.dietType || 'none',
+        profile.medicalConditions || [],
+      );
+      setAnalysisResult(result);
+      saveScan(result, 'Food Product');
 
-    // Try loading existing profile from MongoDB
-    const existing = await loadProfileFromMongo(email.trim());
-    setLoading(false);
+      if (comparisonCallback) {
+        comparisonCallback(result, 'Food Product');
+        setComparisonCallback(null);
+        toast.success('Product added to comparison!');
+      }
 
-    if (existing) {
-      // User exists — load profile and skip setup
-      saveUserProfile(existing);
-      onComplete(existing);
-    } else {
-      // New user — go through setup
-      setStep('name');
+      setCurrentStep(3);
+    } catch (error) {
+      console.error('Analysis failed:', error);
+      toast.error('Analysis failed. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleComplete = async () => {
-    const isDiabetic = medicalConditions.includes('diabetes');
-    const profile: UserProfileData = {
-      email, name, age, dietType, isDiabetic,
-      medicalConditions, allergies, isSetup: true,
-    };
-
-    // Save to localStorage + MongoDB
-    saveUserProfile(profile);
-    await saveProfileToMongo(profile);
-    onComplete(profile);
+  // ── Reset ─────────────────────────────────────────────────
+  const handleReset = () => {
+    setCurrentStep(1);
+    setScanMode('label');
+    setSelectedFile(null);
+    setExtractedText('');
+    setAnalysisResult(null);
+    setUsedFallback(false);
   };
 
+  // ── Language change ───────────────────────────────────────
+  const handleLanguageChange = (newLang: Language) => {
+    setLang(newLang);
+    saveLanguage(newLang);
+  };
+
+  // ── Profile Setup Screen ──────────────────────────────────
+  if (showProfileSetup) {
+    return <UserProfile onComplete={handleProfileComplete} />;
+  }
+
+  // ── Main App ──────────────────────────────────────────────
   return (
-    <div className="min-h-screen animated-bg flex items-center justify-center px-6">
-      <div className="w-full max-w-lg">
+    <div className="min-h-screen animated-bg">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: 'rgba(255, 255, 255, 0.05)',
+            backdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            color: '#FFFFFF',
+            fontFamily: 'JetBrains Mono, monospace',
+          },
+        }}
+      />
 
-        {/* Logo */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          <div className="text-[#AAFF45] text-5xl mb-3">⬡</div>
-          <h1 className="text-3xl font-display font-bold text-white">LabelLens</h1>
-          <p className="text-[#8B95A8] font-mono text-sm mt-1">
-            Setup your health profile — only once!
-          </p>
-        </motion.div>
+      {/* Loading Overlay */}
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: 'rgba(8, 11, 20, 0.9)', backdropFilter: 'blur(12px)' }}
+          >
+            <div className="text-center">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                className="w-20 h-20 rounded-full border-4 border-white/10 border-t-[#AAFF45] mb-6 mx-auto"
+                style={{ boxShadow: '0 0 24px rgba(170, 255, 69, 0.4)' }}
+              />
+              <motion.p
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="text-white font-display text-xl font-bold"
+              >
+                {t('analyseIngredients', lang)}...
+              </motion.p>
+              <p className="text-[#8B95A8] font-mono text-sm mt-2">
+                This will only take a moment
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Progress Bar */}
-        <div className="flex gap-2 mb-8">
-          {steps.map((s, i) => (
-            <div
-              key={s}
-              className="flex-1 h-1 rounded-full transition-all duration-500"
-              style={{
-                background: currentStepIndex >= i
-                  ? '#AAFF45' : 'rgba(255,255,255,0.1)'
-              }}
-            />
-          ))}
+      {/* ── HEADER ── */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        className="border-b border-white/5 backdrop-blur-xl bg-white/[0.02] sticky top-0 z-30"
+      >
+        <div className="max-w-6xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between gap-3">
+
+            {/* Logo */}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <motion.div
+                animate={{
+                  filter: [
+                    'drop-shadow(0 0 8px rgba(170, 255, 69, 0.6))',
+                    'drop-shadow(0 0 16px rgba(170, 255, 69, 0.9))',
+                    'drop-shadow(0 0 8px rgba(170, 255, 69, 0.6))'
+                  ]
+                }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="text-[#AAFF45] text-3xl"
+              >
+                ⬡
+              </motion.div>
+              <div>
+                <h1 className="text-2xl font-display font-bold text-white">
+                  {t('appName', lang)}
+                </h1>
+                <p className="text-xs text-[#8B95A8] font-mono hidden sm:block">
+                  {userName ? `Hey ${userName} 👋` : t('tagline', lang)}
+                </p>
+              </div>
+            </div>
+
+            {/* Right side buttons */}
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+
+              {/* Health badges — desktop only */}
+              <div className="hidden lg:flex items-center gap-2">
+                {isDiabetic && (
+                  <span className="px-3 py-1 rounded-full text-xs font-mono border border-[#FFB800]/30 bg-[#FFB800]/10 text-[#FFB800]">
+                    🩺 Diabetic
+                  </span>
+                )}
+                {allergies.length > 0 && (
+                  <span className="px-3 py-1 rounded-full text-xs font-mono border border-[#00E5FF]/30 bg-[#00E5FF]/10 text-[#00E5FF]">
+                    🚨 {allergies.length} Allerg{allergies.length > 1 ? 'ies' : 'y'}
+                  </span>
+                )}
+              </div>
+
+              {/* Theme Toggle */}
+              <ThemeToggle />
+
+              {/* Language Switcher */}
+              <LanguageSwitcher
+                currentLang={lang}
+                onChange={handleLanguageChange}
+              />
+
+              {/* History Button */}
+              <button
+                onClick={() => setShowHistory(true)}
+                title="Scan History"
+                className="flex items-center gap-1 px-3 py-2 rounded-xl border border-[#AAFF45]/30 bg-[#AAFF45]/5 text-[#AAFF45] hover:bg-[#AAFF45]/15 hover:border-[#AAFF45] transition-all font-mono text-sm font-bold"
+              >
+                {t('history', lang)}
+              </button>
+
+              {/* Voice Assistant Button */}
+              <button
+                onClick={() => setShowVoice(true)}
+                title="Voice Assistant"
+                className="flex items-center gap-1 px-3 py-2 rounded-xl border border-[#00E5FF]/30 bg-[#00E5FF]/5 text-[#00E5FF] hover:bg-[#00E5FF]/15 hover:border-[#00E5FF] transition-all font-mono text-sm font-bold"
+              >
+                🎤 <span className="hidden sm:inline">Voice</span>
+              </button>
+
+              {/* Compare Button */}
+              <button
+                onClick={() => setShowComparison(true)}
+                title="Compare Products"
+                className="flex items-center gap-1 px-3 py-2 rounded-xl border border-[#FFB800]/30 bg-[#FFB800]/5 text-[#FFB800] hover:bg-[#FFB800]/15 hover:border-[#FFB800] transition-all font-mono text-sm font-bold"
+              >
+                ⚖️ <span className="hidden sm:inline">Compare</span>
+              </button>
+
+              {/* Settings button */}
+              <button
+              onClick={handleLogout}
+              title="Logout"
+              className="flex items-center gap-1 px-3 py-2 rounded-xl border border-[#FF3D5A]/30 bg-[#FF3D5A]/5 text-[#FF3D5A] hover:bg-[#FF3D5A]/15 hover:border-[#FF3D5A] transition-all font-mono text-sm"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+
+              {/* Scan Another — only on step 3 */}
+              {currentStep === 3 && (
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+                  <Button
+                    onClick={handleReset}
+                    variant="outline"
+                    className="border-2 border-white/20 text-white hover:border-[#AAFF45] hover:text-[#AAFF45] hover:bg-[#AAFF45]/5 font-display font-bold transition-all duration-200 bg-transparent text-sm"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    <span className="hidden sm:inline">{t('scanAnother', lang)}</span>
+                    <span className="sm:hidden">Rescan</span>
+                  </Button>
+                </motion.div>
+              )}
+            </div>
+          </div>
         </div>
+        <div className="h-px bg-gradient-to-r from-transparent via-[#AAFF45]/30 to-transparent" />
+      </motion.div>
 
+      {/* ── MAIN CONTENT ── */}
+      <div className="max-w-6xl mx-auto px-6 py-12">
         <AnimatePresence mode="wait">
 
-          {/* STEP 0 — Email */}
-          {step === 'email' && (
-            <motion.div key="email"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
+          {/* ── STEP 1 ── */}
+          {currentStep === 1 && (
+            <motion.div
+              key="step1"
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 30 }}
+              transition={{ duration: 0.4 }}
             >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                📧 Enter your email
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                Returning user? Your profile will load automatically.
-              </p>
-              <input
-                type="email"
-                value={email}
-                onChange={e => { setEmail(e.target.value); setEmailError(''); }}
-                onKeyDown={e => e.key === 'Enter' && email.trim() && handleEmailContinue()}
-                placeholder="you@example.com"
-                className="w-full bg-white/5 text-white border-2 border-white/10 rounded-xl p-4 font-mono text-lg focus:outline-none focus:border-[#AAFF45]/50 transition-all mb-2"
-                autoFocus
-              />
-              {emailError && (
-                <p className="text-[#FF3D5A] font-mono text-xs mb-4">{emailError}</p>
-              )}
-              <Button
-                onClick={handleEmailContinue}
-                disabled={!email.trim() || loading}
-                className="w-full bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl py-6 disabled:opacity-30 btn-glow mt-4"
+              <div className="mb-8">
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="inline-flex items-center gap-3 px-6 py-3 rounded-full border border-white/10 bg-white/[0.02] backdrop-blur-sm"
+                >
+                  <span className="text-[#AAFF45] font-display font-bold text-lg">01</span>
+                  <span className="text-white font-mono text-sm font-semibold">
+                    {t('step1', lang)}
+                  </span>
+                </motion.div>
+              </div>
+
+              {/* Mode Toggle */}
+              <div className="flex gap-3 mb-6">
+                <button
+                  onClick={() => setScanMode('label')}
+                  className={`flex-1 py-4 rounded-2xl font-display font-bold text-lg border-2 transition-all duration-200
+                    ${scanMode === 'label'
+                      ? 'bg-[#AAFF45]/10 border-[#AAFF45] text-[#AAFF45]'
+                      : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
+                    }`}
+                >
+                  {t('scanLabel', lang)}
+                </button>
+                <button
+                  onClick={() => setScanMode('barcode')}
+                  className={`flex-1 py-4 rounded-2xl font-display font-bold text-lg border-2 transition-all duration-200
+                    ${scanMode === 'barcode'
+                      ? 'bg-[#AAFF45]/10 border-[#AAFF45] text-[#AAFF45]'
+                      : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
+                    }`}
+                >
+                  {t('scanBarcode', lang)}
+                </button>
+              </div>
+
+              <div className="glass-card rounded-3xl p-8 border border-white/10 relative">
+                <div className="gradient-border-top" />
+                <AnimatePresence mode="wait">
+                  {scanMode === 'label' ? (
+                    <motion.div
+                      key="label"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <ImageUploader
+                        onExtractComplete={handleExtractComplete}
+                        onFileSelect={setSelectedFile}
+                        selectedFile={selectedFile}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="barcode"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <BarcodeScanner
+                        onIngredientsFound={(text, productName) => {
+                          toast.success(`Found: ${productName}`);
+                          handleExtractComplete(`INGREDIENTS: ${text}`, false);
+                        }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── STEP 2 ── */}
+          {currentStep === 2 && (
+            <motion.div
+              key="step2"
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 30 }}
+              transition={{ duration: 0.4 }}
+            >
+              <div className="mb-8">
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="inline-flex items-center gap-3 px-6 py-3 rounded-full border border-white/10 bg-white/[0.02] backdrop-blur-sm"
+                >
+                  <span className="text-[#AAFF45] font-display font-bold text-lg">02</span>
+                  <span className="text-white font-mono text-sm font-semibold">
+                    {t('step2', lang)}
+                  </span>
+                </motion.div>
+              </div>
+
+              {/* Profile summary card */}
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 glass-card rounded-2xl p-5 border border-white/10 flex items-center justify-between"
               >
-                {loading ? '⏳ Checking...' : 'Continue →'}
+                <div>
+                  <p className="text-white font-display font-bold text-sm mb-1">
+                    ✅ Using your saved health profile
+                  </p>
+                  <p className="text-[#8B95A8] font-mono text-xs">
+                    {isDiabetic ? '🩺 Diabetic · ' : ''}
+                    {allergies.length > 0
+                      ? `🚨 ${allergies.join(', ')} allergies`
+                      : 'No allergies set'}
+                  </p>
+                </div>
+              
+              </motion.div>
+
+              {usedFallback && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-6 glass-card rounded-2xl p-5 border-2 border-[#FFB800]/30 bg-[#FFB800]/5"
+                >
+                  <p className="text-[#FFB800] font-mono text-sm">
+                    ⚠️ Demo Mode Active — Backend service unavailable. Using sample data.
+                  </p>
+                </motion.div>
+              )}
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="glass-card rounded-3xl p-8 border border-white/10 mb-8 relative"
+              >
+                <div className="gradient-border-top" />
+                <div className="mb-6">
+                  <label className="block text-[#8B95A8] font-mono text-sm mb-3 font-semibold">
+                    {t('extractedText', lang)}
+                  </label>
+                  <textarea
+                    value={extractedText}
+                    onChange={(e) => setExtractedText(e.target.value)}
+                    className="w-full bg-white/5 text-white border-2 border-white/10 rounded-2xl p-6 font-mono text-sm min-h-[140px] focus:outline-none focus:border-[#AAFF45]/50 focus:bg-white/[0.07] transition-all duration-200 backdrop-blur-sm resize-none"
+                    placeholder="Extracted ingredients will appear here..."
+                    style={{ boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.3)' }}
+                  />
+                  <div className="text-right mt-2">
+                    <span className="text-[#8B95A8] font-mono text-xs">
+                      {extractedText.length} characters
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+
+              <Button
+                onClick={handleAnalyze}
+                disabled={loading || !extractedText}
+                size="lg"
+                className="w-full bg-[#AAFF45] hover:bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl shadow-lg disabled:opacity-30 disabled:cursor-not-allowed btn-glow text-lg py-7 relative overflow-hidden"
+              >
+                {loading ? (
+                  <>
+                    <div className="absolute inset-0 shimmer"></div>
+                    <Loader2 className="w-6 h-6 mr-2 animate-spin relative z-10" />
+                    <span className="relative z-10">{t('analyseIngredients', lang)}...</span>
+                  </>
+                ) : (
+                  t('analyseIngredients', lang)
+                )}
               </Button>
             </motion.div>
           )}
 
-          {/* STEP 1 — Name */}
-          {step === 'name' && (
-            <motion.div key="name"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
+          {/* ── STEP 3 ── */}
+          {currentStep === 3 && analysisResult && (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 30 }}
+              transition={{ duration: 0.4 }}
             >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                👋 What's your name?
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                We'll personalise your experience
-              </p>
-              <input
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && name.trim() && setStep('age')}
-                placeholder="Enter your name..."
-                className="w-full bg-white/5 text-white border-2 border-white/10 rounded-xl p-4 font-mono text-lg focus:outline-none focus:border-[#AAFF45]/50 transition-all mb-6"
-                autoFocus
-              />
-              <div className="flex gap-3">
-                <Button onClick={() => setStep('email')} variant="outline"
-                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
-                  ← Back
-                </Button>
-                <Button
-                  onClick={() => setStep('age')}
-                  disabled={!name.trim()}
-                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl py-6 disabled:opacity-30 btn-glow"
+              <div className="mb-8">
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="inline-flex items-center gap-3 px-6 py-3 rounded-full border border-white/10 bg-white/[0.02] backdrop-blur-sm"
                 >
-                  Continue →
-                </Button>
-              </div>
-            </motion.div>
-          )}
-
-          {/* STEP 2 — Age */}
-          {step === 'age' && (
-            <motion.div key="age"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
-            >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                🎂 Age Group?
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                Different age groups have different needs
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-8">
-                {AGE_OPTIONS.map(({ value, label, emoji, desc }) => (
-                  <button
-                    key={value}
-                    onClick={() => setAge(value)}
-                    className={`py-4 px-4 rounded-2xl border-2 transition-all text-left
-                      ${age === value
-                        ? 'bg-[#AAFF45]/10 border-[#AAFF45] text-[#AAFF45]'
-                        : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
-                      }`}
-                  >
-                    <div className="text-2xl mb-1">{emoji}</div>
-                    <div className="font-display font-bold">{label}</div>
-                    <div className="font-mono text-xs opacity-70">{desc}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-3">
-                <Button onClick={() => setStep('name')} variant="outline"
-                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
-                  ← Back
-                </Button>
-                <Button onClick={() => setStep('diet')}
-                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-bold rounded-xl py-6 btn-glow">
-                  Continue →
-                </Button>
-              </div>
-            </motion.div>
-          )}
-
-          {/* STEP 3 — Diet */}
-          {step === 'diet' && (
-            <motion.div key="diet"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
-            >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                🥗 Diet Type?
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                We'll flag ingredients that don't match your diet
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-8">
-                {DIET_OPTIONS.map(({ value, label, emoji }) => (
-                  <button
-                    key={value}
-                    onClick={() => setDietType(value)}
-                    className={`py-4 px-4 rounded-2xl border-2 transition-all text-left
-                      ${dietType === value
-                        ? 'bg-[#00E5FF]/10 border-[#00E5FF] text-[#00E5FF]'
-                        : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
-                      }`}
-                  >
-                    <div className="text-2xl mb-1">{emoji}</div>
-                    <div className="font-display font-bold text-sm">{label}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-3">
-                <Button onClick={() => setStep('age')} variant="outline"
-                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
-                  ← Back
-                </Button>
-                <Button onClick={() => setStep('medical')}
-                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-bold rounded-xl py-6 btn-glow">
-                  Continue →
-                </Button>
-              </div>
-            </motion.div>
-          )}
-
-          {/* STEP 4 — Medical */}
-          {step === 'medical' && (
-            <motion.div key="medical"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
-            >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                🏥 Medical Conditions?
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                Select all that apply — skip if none
-              </p>
-              <div className="grid grid-cols-2 gap-3 mb-8">
-                {MEDICAL_OPTIONS.map(({ value, label, emoji }) => (
-                  <button
-                    key={value}
-                    onClick={() => toggleItem(medicalConditions, setMedicalConditions, value)}
-                    className={`py-3 px-4 rounded-xl border-2 transition-all text-left flex items-center gap-2
-                      ${medicalConditions.includes(value)
-                        ? 'bg-[#FF3D5A]/10 border-[#FF3D5A] text-[#FF3D5A]'
-                        : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
-                      }`}
-                  >
-                    <span>{emoji}</span>
-                    <span className="font-mono text-sm">{label}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-3">
-                <Button onClick={() => setStep('diet')} variant="outline"
-                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
-                  ← Back
-                </Button>
-                <Button onClick={() => setStep('allergies')}
-                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-bold rounded-xl py-6 btn-glow">
-                  Continue →
-                </Button>
-
-                {/* Custom medical input */}
-<div className="flex gap-2 mb-4">
-  <input
-    type="text"
-    value={customMedical}
-    onChange={e => setCustomMedical(e.target.value)}
-    onKeyDown={e => e.key === 'Enter' && addCustomMedical()}
-    placeholder="Add other condition..."
-    className="flex-1 bg-white/5 text-white border-2 border-white/10 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-[#AAFF45]/50 transition-all"
-  />
-  <button
-    onClick={addCustomMedical}
-    disabled={!customMedical.trim()}
-    className="px-4 py-3 rounded-xl bg-[#FF3D5A]/10 border-2 border-[#FF3D5A]/30 text-[#FF3D5A] font-mono text-sm hover:bg-[#FF3D5A]/20 disabled:opacity-30 transition-all"
-  >
-    + Add
-  </button>
-</div>
-
-{/* Custom conditions added */}
-{medicalConditions.filter(m => !MEDICAL_OPTIONS.find(o => o.value === m)).length > 0 && (
-  <div className="flex flex-wrap gap-2 mb-4">
-    {medicalConditions
-      .filter(m => !MEDICAL_OPTIONS.find(o => o.value === m))
-      .map(m => (
-        <span
-          key={m}
-          className="flex items-center gap-1 px-3 py-1 rounded-full bg-[#FF3D5A]/10 border border-[#FF3D5A]/30 text-[#FF3D5A] font-mono text-xs"
-        >
-          {m}
-          <button
-            onClick={() => removeMedical(m)}
-            className="ml-1 hover:text-white transition-all"
-          >
-            ×
-          </button>
-        </span>
-      ))}
-  </div>
-)}
-              </div>
-            </motion.div>
-          )}
-
-          {/* STEP 5 — Allergies */}
-          {step === 'allergies' && (
-            <motion.div key="allergies"
-              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              className="glass-card rounded-3xl p-8 border border-white/10 relative"
-            >
-              <div className="gradient-border-top" />
-              <h2 className="text-2xl font-display font-bold text-white mb-2">
-                🚨 Any Allergies?
-              </h2>
-              <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                Select from list or add your own
-              </p>
-
-              {/* Preset allergies */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                {ALLERGY_OPTIONS.map(({ value, label, emoji }) => (
-                  <button
-                    key={value}
-                    onClick={() => toggleItem(allergies, setAllergies, value)}
-                    className={`py-3 px-4 rounded-xl border-2 transition-all text-left flex items-center gap-2
-                      ${allergies.includes(value)
-                        ? 'bg-[#00E5FF]/10 border-[#00E5FF] text-[#00E5FF]'
-                        : 'bg-white/5 border-white/10 text-[#8B95A8] hover:border-white/20'
-                      }`}
-                  >
-                    <span>{emoji}</span>
-                    <span className="font-mono text-sm">{label}</span>
-                  </button>
-                ))}
+                  <span className="text-[#AAFF45] font-display font-bold text-lg">03</span>
+                  <span className="text-white font-mono text-sm font-semibold">
+                    {t('step3', lang)}
+                  </span>
+                </motion.div>
               </div>
 
-              {/* Custom allergy input */}
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  value={customAllergy}
-                  onChange={e => setCustomAllergy(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addCustomAllergy()}
-                  placeholder="Add custom allergy..."
-                  className="flex-1 bg-white/5 text-white border-2 border-white/10 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-[#AAFF45]/50 transition-all"
-                />
-                <button
-                  onClick={addCustomAllergy}
-                  disabled={!customAllergy.trim()}
-                  className="px-4 py-3 rounded-xl bg-[#AAFF45]/10 border-2 border-[#AAFF45]/30 text-[#AAFF45] font-mono text-sm hover:bg-[#AAFF45]/20 disabled:opacity-30 transition-all"
-                >
-                  + Add
-                </button>
-              </div>
-
-              {/* Custom allergies added */}
-              {allergies.filter(a => !ALLERGY_OPTIONS.find(o => o.value === a)).length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {allergies
-                    .filter(a => !ALLERGY_OPTIONS.find(o => o.value === a))
-                    .map(a => (
-                      <span
-                        key={a}
-                        className="flex items-center gap-1 px-3 py-1 rounded-full bg-[#AAFF45]/10 border border-[#AAFF45]/30 text-[#AAFF45] font-mono text-xs"
-                      >
-                        {a}
-                        <button
-                          onClick={() => removeAllergy(a)}
-                          className="ml-1 hover:text-[#FF3D5A] transition-all"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <Button onClick={() => setStep('medical')} variant="outline"
-                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
-                  ← Back
-                </Button>
-                <Button onClick={handleComplete}
-                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-bold rounded-xl py-6 btn-glow">
-                  🚀 Start Scanning!
-                </Button>
+              <div className="glass-card rounded-3xl p-8 border border-white/10 relative">
+                <div className="gradient-border-top" />
+                <ResultsPanel results={analysisResult} lang={lang} />
               </div>
             </motion.div>
           )}
 
         </AnimatePresence>
       </div>
+
+      {/* ── MODALS ── */}
+
+      <AnimatePresence>
+        {showHistory && (
+          <ScanHistory onClose={() => setShowHistory(false)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showVoice && (
+          <VoiceAssistant
+            onClose={() => setShowVoice(false)}
+            analysisResult={analysisResult}
+            onBarcodeDetected={(barcode) => {
+              setShowVoice(false);
+              setScanMode('barcode');
+              setCurrentStep(1);
+              import('./services/api').then(({ apiService }) => {
+                apiService.lookupBarcode(barcode).then((result) => {
+                  if (result.success && result.ingredients_text) {
+                    toast.success(`Found: ${result.product_name}`);
+                    handleExtractComplete(`INGREDIENTS: ${result.ingredients_text}`, false);
+                  } else {
+                    toast.error('Product not found. Try manual entry.');
+                  }
+                });
+              });
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showComparison && (
+          <ProductComparison
+            onClose={() => setShowComparison(false)}
+            currentScan={analysisResult}
+            onScanNew={(callback) => {
+              setComparisonCallback(() => callback);
+              setShowComparison(false);
+              handleReset();
+              toast.info('Scan your second product!');
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ── FOOTER ── */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.8 }}
+        className="border-t border-white/5 mt-16 backdrop-blur-xl bg-white/[0.01]"
+      >
+        <div className="max-w-6xl mx-auto px-6 py-6 text-center">
+          <p className="text-[#8B95A8] font-mono text-sm">
+            Powered by AI • FastAPI Backend • Built with React + Tailwind
+          </p>
+        </div>
+      </motion.div>
     </div>
   );
 }
+
+export default App;
