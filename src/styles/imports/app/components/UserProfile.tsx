@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from './ui/button';
 
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
 export interface UserProfileData {
+  email: string;
   name: string;
   age: string;
   dietType: string;
@@ -26,43 +29,44 @@ const ALLERGY_OPTIONS = [
 ];
 
 const AGE_OPTIONS = [
-  { value: 'child',  label: 'Child',   emoji: '👶', desc: 'Under 12' },
-  { value: 'teen',   label: 'Teen',    emoji: '🧒', desc: '13–17' },
-  { value: 'adult',  label: 'Adult',   emoji: '🧑', desc: '18–60' },
-  { value: 'senior', label: 'Senior',  emoji: '👴', desc: '60+' },
+  { value: 'child',  label: 'Child',  emoji: '👶', desc: 'Under 12' },
+  { value: 'teen',   label: 'Teen',   emoji: '🧒', desc: '13–17'   },
+  { value: 'adult',  label: 'Adult',  emoji: '🧑', desc: '18–60'   },
+  { value: 'senior', label: 'Senior', emoji: '👴', desc: '60+'     },
 ];
 
 const DIET_OPTIONS = [
-  { value: 'none',          label: 'No Restriction', emoji: '🍽️' },
-  { value: 'vegetarian',    label: 'Vegetarian',     emoji: '🥗' },
-  { value: 'vegan',         label: 'Vegan',          emoji: '🌱' },
-  { value: 'keto',          label: 'Keto',           emoji: '🥩' },
-  { value: 'low_sodium',    label: 'Low Sodium',     emoji: '🧂' },
-  { value: 'low_sugar',     label: 'Low Sugar',      emoji: '🍬' },
+  { value: 'none',       label: 'No Restriction', emoji: '🍽️' },
+  { value: 'vegetarian', label: 'Vegetarian',     emoji: '🥗' },
+  { value: 'vegan',      label: 'Vegan',          emoji: '🌱' },
+  { value: 'keto',       label: 'Keto',           emoji: '🥩' },
+  { value: 'low_sodium', label: 'Low Sodium',     emoji: '🧂' },
+  { value: 'low_sugar',  label: 'Low Sugar',      emoji: '🍬' },
 ];
 
 const MEDICAL_OPTIONS = [
-  { value: 'diabetes',     label: 'Diabetes',         emoji: '🩺' },
-  { value: 'hypertension', label: 'High BP',          emoji: '💓' },
-  { value: 'pregnant',     label: 'Pregnant',         emoji: '🤰' },
-  { value: 'heart',        label: 'Heart Disease',    emoji: '❤️' },
-  { value: 'kidney',       label: 'Kidney Disease',   emoji: '🫘' },
-  { value: 'thyroid',      label: 'Thyroid',          emoji: '🦋' },
-  { value: 'ibs',          label: 'IBS/Gut Issues',   emoji: '🫃' },
-  { value: 'celiac',       label: 'Celiac Disease',   emoji: '🌾' },
+  { value: 'diabetes',     label: 'Diabetes',      emoji: '🩺' },
+  { value: 'hypertension', label: 'High BP',        emoji: '💓' },
+  { value: 'pregnant',     label: 'Pregnant',       emoji: '🤰' },
+  { value: 'heart',        label: 'Heart Disease',  emoji: '❤️' },
+  { value: 'kidney',       label: 'Kidney Disease', emoji: '🫘' },
+  { value: 'thyroid',      label: 'Thyroid',        emoji: '🦋' },
+  { value: 'ibs',          label: 'IBS/Gut Issues', emoji: '🫃' },
+  { value: 'celiac',       label: 'Celiac Disease', emoji: '🌾' },
 ];
 
 const STORAGE_KEY = 'labellens_user_profile';
 
+// ── STORAGE HELPERS ───────────────────────────────────────────
 export function getUserProfile(): UserProfileData {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) return JSON.parse(saved);
   } catch {}
   return {
-    name: '', age: 'adult', dietType: 'none',
+    email: '', name: '', age: 'adult', dietType: 'none',
     isDiabetic: false, medicalConditions: [],
-    allergies: [], isSetup: false
+    allergies: [], isSetup: false,
   };
 }
 
@@ -74,34 +78,137 @@ export function clearUserProfile(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
 
+// ── MONGODB API HELPERS ───────────────────────────────────────
+async function saveProfileToMongo(profile: UserProfileData): Promise<void> {
+  try {
+    // Try update first — if not found, create
+    const res = await fetch(`${BASE_URL}/user/${encodeURIComponent(profile.email)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: profile.email,
+        name: profile.name,
+        age: profile.age,
+        diet_type: profile.dietType,
+        is_diabetic: profile.isDiabetic,
+        medical_conditions: profile.medicalConditions,
+        allergies: profile.allergies,
+      }),
+    });
+
+    if (!res.ok) {
+      // Create new user
+      await fetch(`${BASE_URL}/user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: profile.email,
+          name: profile.name,
+          age: profile.age,
+          diet_type: profile.dietType,
+          is_diabetic: profile.isDiabetic,
+          medical_conditions: profile.medicalConditions,
+          allergies: profile.allergies,
+        }),
+      });
+    }
+  } catch (e) {
+    console.error('MongoDB save failed — using localStorage only', e);
+  }
+}
+
+async function loadProfileFromMongo(email: string): Promise<UserProfileData | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/user/${encodeURIComponent(email)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const u = data.user;
+    return {
+      email: u.email,
+      name: u.name,
+      age: u.age || 'adult',
+      dietType: u.diet_type || 'none',
+      isDiabetic: u.is_diabetic || false,
+      medicalConditions: u.medical_conditions || [],
+      allergies: u.allergies || [],
+      isSetup: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── MAIN COMPONENT ────────────────────────────────────────────
 interface UserProfileProps {
   onComplete: (profile: UserProfileData) => void;
 }
 
 export function UserProfile({ onComplete }: UserProfileProps) {
-  const [step, setStep] = useState<'name' | 'age' | 'diet' | 'medical' | 'allergies'>('name');
-  const [name, setName] = useState('');
-  const [age, setAge] = useState('adult');
+  const [step, setStep] = useState<'email' | 'name' | 'age' | 'diet' | 'medical' | 'allergies'>('email');
+  const [email, setEmail]   = useState('');
+  const [name, setName]     = useState('');
+  const [age, setAge]       = useState('adult');
   const [dietType, setDietType] = useState('none');
   const [medicalConditions, setMedicalConditions] = useState<string[]>([]);
-  const [allergies, setAllergies] = useState<string[]>([]);
+  const [allergies, setAllergies]   = useState<string[]>([]);
+  const [customAllergy, setCustomAllergy] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
-  const steps = ['name', 'age', 'diet', 'medical', 'allergies'];
+  const steps = ['email', 'name', 'age', 'diet', 'medical', 'allergies'];
   const currentStepIndex = steps.indexOf(step);
 
   const toggleItem = (list: string[], setList: any, value: string) => {
     setList((prev: string[]) =>
-      prev.includes(value) ? prev.filter(i => i !== value) : [...prev, value]
+      prev.includes(value) ? prev.filter((i: string) => i !== value) : [...prev, value]
     );
   };
 
-  const handleComplete = () => {
+  const addCustomAllergy = () => {
+    const trimmed = customAllergy.trim().toLowerCase();
+    if (trimmed && !allergies.includes(trimmed)) {
+      setAllergies(prev => [...prev, trimmed]);
+      setCustomAllergy('');
+    }
+  };
+
+  const removeAllergy = (value: string) => {
+    setAllergies(prev => prev.filter(a => a !== value));
+  };
+
+  // ── EMAIL STEP — check if user exists ─────────────────────
+  const handleEmailContinue = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setEmailError('Please enter a valid email');
+      return;
+    }
+    setEmailError('');
+    setLoading(true);
+
+    // Try loading existing profile from MongoDB
+    const existing = await loadProfileFromMongo(email.trim());
+    setLoading(false);
+
+    if (existing) {
+      // User exists — load profile and skip setup
+      saveUserProfile(existing);
+      onComplete(existing);
+    } else {
+      // New user — go through setup
+      setStep('name');
+    }
+  };
+
+  const handleComplete = async () => {
     const isDiabetic = medicalConditions.includes('diabetes');
     const profile: UserProfileData = {
-      name, age, dietType, isDiabetic,
-      medicalConditions, allergies, isSetup: true
+      email, name, age, dietType, isDiabetic,
+      medicalConditions, allergies, isSetup: true,
     };
+
+    // Save to localStorage + MongoDB
     saveUserProfile(profile);
+    await saveProfileToMongo(profile);
     onComplete(profile);
   };
 
@@ -138,6 +245,42 @@ export function UserProfile({ onComplete }: UserProfileProps) {
 
         <AnimatePresence mode="wait">
 
+          {/* STEP 0 — Email */}
+          {step === 'email' && (
+            <motion.div key="email"
+              initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -30 }}
+              className="glass-card rounded-3xl p-8 border border-white/10 relative"
+            >
+              <div className="gradient-border-top" />
+              <h2 className="text-2xl font-display font-bold text-white mb-2">
+                📧 Enter your email
+              </h2>
+              <p className="text-[#8B95A8] font-mono text-sm mb-6">
+                Returning user? Your profile will load automatically.
+              </p>
+              <input
+                type="email"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setEmailError(''); }}
+                onKeyDown={e => e.key === 'Enter' && email.trim() && handleEmailContinue()}
+                placeholder="you@example.com"
+                className="w-full bg-white/5 text-white border-2 border-white/10 rounded-xl p-4 font-mono text-lg focus:outline-none focus:border-[#AAFF45]/50 transition-all mb-2"
+                autoFocus
+              />
+              {emailError && (
+                <p className="text-[#FF3D5A] font-mono text-xs mb-4">{emailError}</p>
+              )}
+              <Button
+                onClick={handleEmailContinue}
+                disabled={!email.trim() || loading}
+                className="w-full bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl py-6 disabled:opacity-30 btn-glow mt-4"
+              >
+                {loading ? '⏳ Checking...' : 'Continue →'}
+              </Button>
+            </motion.div>
+          )}
+
           {/* STEP 1 — Name */}
           {step === 'name' && (
             <motion.div key="name"
@@ -161,13 +304,19 @@ export function UserProfile({ onComplete }: UserProfileProps) {
                 className="w-full bg-white/5 text-white border-2 border-white/10 rounded-xl p-4 font-mono text-lg focus:outline-none focus:border-[#AAFF45]/50 transition-all mb-6"
                 autoFocus
               />
-              <Button
-                onClick={() => setStep('age')}
-                disabled={!name.trim()}
-                className="w-full bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl py-6 disabled:opacity-30 btn-glow"
-              >
-                Continue →
-              </Button>
+              <div className="flex gap-3">
+                <Button onClick={() => setStep('email')} variant="outline"
+                  className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
+                  ← Back
+                </Button>
+                <Button
+                  onClick={() => setStep('age')}
+                  disabled={!name.trim()}
+                  className="flex-1 bg-[#AAFF45] text-[#080B14] font-display font-bold rounded-xl py-6 disabled:opacity-30 btn-glow"
+                >
+                  Continue →
+                </Button>
+              </div>
             </motion.div>
           )}
 
@@ -313,9 +462,11 @@ export function UserProfile({ onComplete }: UserProfileProps) {
                 🚨 Any Allergies?
               </h2>
               <p className="text-[#8B95A8] font-mono text-sm mb-6">
-                Select all that apply — skip if none
+                Select from list or add your own
               </p>
-              <div className="grid grid-cols-2 gap-3 mb-8">
+
+              {/* Preset allergies */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
                 {ALLERGY_OPTIONS.map(({ value, label, emoji }) => (
                   <button
                     key={value}
@@ -331,6 +482,48 @@ export function UserProfile({ onComplete }: UserProfileProps) {
                   </button>
                 ))}
               </div>
+
+              {/* Custom allergy input */}
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={customAllergy}
+                  onChange={e => setCustomAllergy(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addCustomAllergy()}
+                  placeholder="Add custom allergy..."
+                  className="flex-1 bg-white/5 text-white border-2 border-white/10 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-[#AAFF45]/50 transition-all"
+                />
+                <button
+                  onClick={addCustomAllergy}
+                  disabled={!customAllergy.trim()}
+                  className="px-4 py-3 rounded-xl bg-[#AAFF45]/10 border-2 border-[#AAFF45]/30 text-[#AAFF45] font-mono text-sm hover:bg-[#AAFF45]/20 disabled:opacity-30 transition-all"
+                >
+                  + Add
+                </button>
+              </div>
+
+              {/* Custom allergies added */}
+              {allergies.filter(a => !ALLERGY_OPTIONS.find(o => o.value === a)).length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {allergies
+                    .filter(a => !ALLERGY_OPTIONS.find(o => o.value === a))
+                    .map(a => (
+                      <span
+                        key={a}
+                        className="flex items-center gap-1 px-3 py-1 rounded-full bg-[#AAFF45]/10 border border-[#AAFF45]/30 text-[#AAFF45] font-mono text-xs"
+                      >
+                        {a}
+                        <button
+                          onClick={() => removeAllergy(a)}
+                          className="ml-1 hover:text-[#FF3D5A] transition-all"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <Button onClick={() => setStep('medical')} variant="outline"
                   className="flex-1 border-white/20 text-white bg-transparent rounded-xl py-6">
@@ -345,10 +538,6 @@ export function UserProfile({ onComplete }: UserProfileProps) {
           )}
 
         </AnimatePresence>
-
-        <p className="text-center text-[#8B95A8] font-mono text-xs mt-6">
-          Saved locally • Never shared • Can edit anytime
-        </p>
       </div>
     </div>
   );
