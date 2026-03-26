@@ -441,12 +441,7 @@ function App() {
                       : 'No allergies set'}
                   </p>
                 </div>
-                <button
-                  onClick={handleResetProfile}
-                  className="text-[#8B95A8] font-mono text-xs hover:text-[#AAFF45] transition-all underline"
-                >
-                  Edit Profile
-                </button>
+              
               </motion.div>
 
               {usedFallback && (
