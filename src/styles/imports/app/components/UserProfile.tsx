@@ -151,6 +151,7 @@ export function UserProfile({ onComplete }: UserProfileProps) {
   const [dietType, setDietType] = useState('none');
   const [medicalConditions, setMedicalConditions] = useState<string[]>([]);
   const [allergies, setAllergies]   = useState<string[]>([]);
+  const [customMedical, setCustomMedical] = useState('');
   const [customAllergy, setCustomAllergy] = useState('');
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
@@ -171,7 +172,17 @@ export function UserProfile({ onComplete }: UserProfileProps) {
       setCustomAllergy('');
     }
   };
+  const addCustomMedical = () => {
+  const trimmed = customMedical.trim().toLowerCase();
+  if (trimmed && !medicalConditions.includes(trimmed)) {
+    setMedicalConditions(prev => [...prev, trimmed]);
+    setCustomMedical('');
+  }
+};
 
+const removeMedical = (value: string) => {
+  setMedicalConditions(prev => prev.filter(m => m !== value));
+};
   const removeAllergy = (value: string) => {
     setAllergies(prev => prev.filter(a => a !== value));
   };
@@ -446,6 +457,47 @@ export function UserProfile({ onComplete }: UserProfileProps) {
                   className="flex-1 bg-[#AAFF45] text-[#080B14] font-bold rounded-xl py-6 btn-glow">
                   Continue →
                 </Button>
+
+                {/* Custom medical input */}
+<div className="flex gap-2 mb-4">
+  <input
+    type="text"
+    value={customMedical}
+    onChange={e => setCustomMedical(e.target.value)}
+    onKeyDown={e => e.key === 'Enter' && addCustomMedical()}
+    placeholder="Add other condition..."
+    className="flex-1 bg-white/5 text-white border-2 border-white/10 rounded-xl p-3 font-mono text-sm focus:outline-none focus:border-[#AAFF45]/50 transition-all"
+  />
+  <button
+    onClick={addCustomMedical}
+    disabled={!customMedical.trim()}
+    className="px-4 py-3 rounded-xl bg-[#FF3D5A]/10 border-2 border-[#FF3D5A]/30 text-[#FF3D5A] font-mono text-sm hover:bg-[#FF3D5A]/20 disabled:opacity-30 transition-all"
+  >
+    + Add
+  </button>
+</div>
+
+{/* Custom conditions added */}
+{medicalConditions.filter(m => !MEDICAL_OPTIONS.find(o => o.value === m)).length > 0 && (
+  <div className="flex flex-wrap gap-2 mb-4">
+    {medicalConditions
+      .filter(m => !MEDICAL_OPTIONS.find(o => o.value === m))
+      .map(m => (
+        <span
+          key={m}
+          className="flex items-center gap-1 px-3 py-1 rounded-full bg-[#FF3D5A]/10 border border-[#FF3D5A]/30 text-[#FF3D5A] font-mono text-xs"
+        >
+          {m}
+          <button
+            onClick={() => removeMedical(m)}
+            className="ml-1 hover:text-white transition-all"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+  </div>
+)}
               </div>
             </motion.div>
           )}
