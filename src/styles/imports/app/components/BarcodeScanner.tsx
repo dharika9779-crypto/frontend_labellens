@@ -269,7 +269,7 @@ export function BarcodeScanner({ onIngredientsFound }: BarcodeScannerProps) {
               className="w-full bg-white/5 text-white border-2 border-white/10 rounded-xl p-4 font-mono text-lg focus:outline-none focus:border-[#AAFF45]/50 transition-all"
             />
             <p className="text-[#8B95A8] font-mono text-xs mt-2">
-              📍 Barkade number is printed at the bottom of the product
+              📍 Barcode number is printed at the bottom of the product
             </p>
           </div>
           <Button
